@@ -62,16 +62,16 @@ class OmniRouteProcessManager:
         print(f"\033[96m⚡ [SYNORA] OmniRoute Gateway is offline. Automatically booting OmniRoute on port {OMNIROUTE_PORT}...\033[0m")
         logger.info("Spawning OmniRoute ('npm run dev') from %s -> %s", REPO_ROOT, log_file)
 
-        out_fd = open(log_file, "a", encoding="utf-8")
         try:
-            self._process = subprocess.Popen(
-                [npm_path, "run", "dev"],
-                cwd=str(REPO_ROOT),
-                stdout=out_fd,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                env={**os.environ, "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
-            )
+            with open(log_file, "a", encoding="utf-8") as out_fd:
+                self._process = subprocess.Popen(
+                    [npm_path, "run", "dev"],
+                    cwd=str(REPO_ROOT),
+                    stdout=out_fd,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    env={**os.environ, "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
+                )
         except Exception as exc:
             logger.error("Failed to spawn OmniRoute process: %s", exc)
             print(f"\033[91m⚠️ [SYNORA] Failed to automatically launch OmniRoute: {exc}\033[0m")

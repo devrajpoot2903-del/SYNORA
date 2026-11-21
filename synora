@@ -52,23 +52,75 @@ def print_help():
   ./synora doctor           # Verify OmniRoute and system health
 """)
 
+def check_and_bootstrap_models():
+    """
+    Zero-Click Auto-Provisioning on First Run:
+    Checks if Ollama is online. If online and no models are installed,
+    automatically downloads a fast starter model (qwen2.5-coder:1.5b, ~980MB)
+    so another user immediately gets genuine local LLM inference out-of-the-box.
+    """
+    import urllib.request
+    import json
+
+    ollama_path = shutil.which("ollama") or "/opt/homebrew/bin/ollama" or "/usr/local/bin/ollama"
+    if not shutil.which("ollama") and not os.path.exists(ollama_path):
+        return
+
+    # Check if Ollama daemon is currently online
+    ollama_online = False
+    installed_models = []
+    try:
+        req = urllib.request.Request("http://127.0.0.1:11434/api/tags", headers={"User-Agent": "SYNORA-Launcher"})
+        with urllib.request.urlopen(req, timeout=1.5) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode())
+                installed_models = [m.get("name") for m in data.get("models", [])]
+                ollama_online = True
+    except Exception:
+        ollama_online = False
+
+    # If Ollama daemon is offline but binary is installed, attempt auto-starting it
+    if not ollama_online:
+        try:
+            if shutil.which("brew"):
+                subprocess.run(["brew", "services", "start", "ollama"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif os.path.exists(ollama_path):
+                subprocess.Popen([ollama_path, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            import time
+            time.sleep(1.2)
+            req = urllib.request.Request("http://127.0.0.1:11434/api/tags", headers={"User-Agent": "SYNORA-Launcher"})
+            with urllib.request.urlopen(req, timeout=1.5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode())
+                    installed_models = [m.get("name") for m in data.get("models", [])]
+                    ollama_online = True
+        except Exception:
+            pass
+
+    # If Ollama is online and zero models are installed, auto-pull starter model
+    if ollama_online and len(installed_models) == 0:
+        starter_model = "qwen2.5-coder:1.5b"
+        print(f"\n{CYAN}⚡ [SYNORA] Zero-Click Auto-Provisioning: First-time setup detected!{RESET}")
+        print(f"📥 Downloading starter local coding model ({BOLD}{starter_model}{RESET}, ~980MB)...")
+        print(f"{DIM}This ensures genuine offline inference out-of-the-box with zero configuration.{RESET}\n")
+        try:
+            res = subprocess.run([ollama_path, "pull", starter_model])
+            if res.returncode == 0:
+                print(f"\n{GREEN}✅ Starter model ({starter_model}) ready for local inference!{RESET}\n")
+            else:
+                print(f"\n{YELLOW}⚠️ Pull exited with code {res.returncode}. Continuing startup...{RESET}\n")
+        except Exception as e:
+            print(f"\n{YELLOW}⚠️ Could not auto-download starter model: {e}{RESET}\n")
+
 def run_all():
     print(BANNER)
+    check_and_bootstrap_models()
     print(f"{CYAN}🚀 Launching complete SYNORA AI + OmniRoute ecosystem...{RESET}")
     print(f"  • {BOLD}OmniRoute Gateway:{RESET} http://localhost:20128/v1 (376 AI Providers)")
     print(f"  • {BOLD}SYNORA Backend:{RESET}    http://localhost:8000 (FastAPI Orchestrator)")
     print(f"  • {BOLD}Claw Code Harness:{RESET} Active (12 autonomous tools & Studio)")
     print(f"  • {BOLD}SYNORA Web UI:{RESET}     http://localhost:5173 (Chat & Claw Studio)")
     print(f"{DIM}Press Ctrl+C to stop all services cleanly.{RESET}\n")
-
-    # Ensure OmniRoute is online or already pre-warmed
-    try:
-        from backend.core.omniroute_process import omniroute_process_manager
-        if not omniroute_process_manager.is_listening():
-            print(f"{CYAN}⚡ Pre-warming OmniRoute AI Gateway on port 20128...{RESET}")
-            omniroute_process_manager.start_background(wait_seconds=6.0)
-    except Exception as e:
-        pass
 
     cmd = [
         "npx", "--yes", "concurrently",
@@ -86,6 +138,7 @@ def run_all():
 
 def run_backend():
     print(f"{GREEN}🚀 Starting SYNORA FastAPI Backend on port 8000...{RESET}")
+    check_and_bootstrap_models()
     try:
         from backend.core.omniroute_process import omniroute_process_manager
         omniroute_process_manager.start_background(wait_seconds=15.0)
@@ -105,6 +158,7 @@ def run_frontend():
     subprocess.run(cmd, cwd=str(root / "frontend"))
 
 def run_claw():
+    check_and_bootstrap_models()
     try:
         from backend.core.omniroute_process import omniroute_process_manager
         omniroute_process_manager.start_background(wait_seconds=15.0)

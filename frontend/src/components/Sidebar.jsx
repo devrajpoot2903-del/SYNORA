@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
-import { 
-  Plus, 
-  MessageSquare, 
-  Trash2, 
-  Search, 
-  Clock, 
-  Cpu, 
+import React, { useState } from "react";
+import {
+  Plus,
+  MessageSquare,
+  Trash2,
+  Search,
+  Clock,
+  Cpu,
   HardDrive,
   ChevronRight,
-  Sparkles
-} from 'lucide-react';
+  Sparkles,
+} from "lucide-react";
 
 export default function Sidebar({
   conversations = [],
@@ -20,25 +20,24 @@ export default function Sidebar({
   latestMetrics,
   health,
 }) {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
 
   const convList = Array.isArray(conversations) ? conversations : [];
 
   // Filter conversations
-  const filtered = convList.filter(conv => {
+  const filtered = convList.filter((conv) => {
     if (!conv) return false;
-    const title = conv.preview || conv.session_id || conv.user_prompt || '';
+    const title = conv.title || conv.preview || conv.session_id || conv.user_prompt || "";
     return String(title).toLowerCase().includes(searchTerm.toLowerCase());
   });
 
-  const rssMb = latestMetrics?.latest_rss_mb || 
-                latestMetrics?.system_resources?.process_memory_rss_mb || 
-                null;
+  const rssMb =
+    latestMetrics?.latest_rss_mb || latestMetrics?.system_resources?.process_memory_rss_mb || null;
 
   return (
     <aside
       className={`h-full min-h-0 fixed lg:static inset-y-0 left-0 z-40 w-72 bg-[#0B0F19] border-r border-slate-800/80 flex flex-col shrink-0 transition-transform duration-300 ease-in-out ${
-        isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
       }`}
     >
       {/* New Chat Button */}
@@ -71,19 +70,24 @@ export default function Sidebar({
       <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-1">
         {filtered.length === 0 ? (
           <div className="px-4 py-8 text-center text-slate-500 text-xs">
-            {searchTerm ? 'No matching conversations' : 'No previous conversations yet.'}
+            {searchTerm ? "No matching conversations" : "No previous conversations yet."}
           </div>
         ) : (
           filtered.map((conv) => {
             if (!conv) return null;
             const isSelected = conv.session_id === currentSessionId;
-            const previewText = conv.preview || conv.user_prompt || 'Untitled Conversation';
-            let dateStr = 'Recent';
-            if (conv.updated_at) {
+            const previewText =
+              conv.title || conv.preview || conv.user_prompt || "Untitled Conversation";
+            let dateStr = "Recent";
+            const dateVal = conv.updated_at || conv.last_updated;
+            if (dateVal) {
               try {
-                dateStr = new Date(conv.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
+                dateStr = new Date(dateVal).toLocaleDateString([], {
+                  month: "short",
+                  day: "numeric",
+                });
               } catch (e) {
-                dateStr = 'Recent';
+                dateStr = "Recent";
               }
             }
 
@@ -93,18 +97,18 @@ export default function Sidebar({
                 onClick={() => onSelectSession(conv.session_id)}
                 className={`w-full text-left px-3 py-2.5 rounded-lg transition-all group flex items-start gap-2.5 relative ${
                   isSelected
-                    ? 'bg-slate-800/80 text-white border border-purple-500/30 shadow-[0_0_12px_rgba(139,92,246,0.15)]'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/50 border border-transparent'
+                    ? "bg-slate-800/80 text-white border border-purple-500/30 shadow-[0_0_12px_rgba(139,92,246,0.15)]"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/50 border border-transparent"
                 }`}
               >
-                <MessageSquare className={`w-4 h-4 shrink-0 mt-0.5 ${
-                  isSelected ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-400'
-                }`} />
+                <MessageSquare
+                  className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    isSelected ? "text-purple-400" : "text-slate-500 group-hover:text-slate-400"
+                  }`}
+                />
 
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium truncate">
-                    {previewText}
-                  </div>
+                  <div className="text-xs font-medium truncate">{previewText}</div>
                   <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
                     <span>{dateStr}</span>
                     {conv.turn_count && (
@@ -134,7 +138,7 @@ export default function Sidebar({
               M2 Memory RSS
             </span>
             <span className="font-mono font-semibold text-slate-200">
-              {rssMb ? `${Math.round(Number(rssMb))} MB` : 'Dynamic Safe'}
+              {rssMb ? `${Math.round(Number(rssMb))} MB` : "Dynamic Safe"}
             </span>
           </div>
 
@@ -143,9 +147,7 @@ export default function Sidebar({
               <HardDrive className="w-3.5 h-3.5 text-purple-400" />
               Catalog Capacity
             </span>
-            <span className="font-mono text-purple-300">
-              30 Models
-            </span>
+            <span className="font-mono text-purple-300">30 Models</span>
           </div>
 
           <div className="pt-1 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-500">

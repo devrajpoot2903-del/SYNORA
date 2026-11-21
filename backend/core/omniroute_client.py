@@ -76,9 +76,21 @@ class OmniRouteClient:
         api_key: Optional[str] = None,
         timeout: Optional[float] = None
     ):
-        self.base_url = (base_url or settings.OMNIROUTE_BASE_URL).rstrip("/")
-        self.api_key = api_key or settings.OMNIROUTE_API_KEY
-        self.timeout = timeout or settings.OMNIROUTE_TIMEOUT_SECONDS
+        self._base_url = base_url
+        self._api_key = api_key
+        self._timeout = timeout
+
+    @property
+    def base_url(self) -> str:
+        return (self._base_url or settings.OMNIROUTE_BASE_URL).rstrip("/")
+
+    @property
+    def api_key(self) -> str:
+        return self._api_key if self._api_key is not None else settings.OMNIROUTE_API_KEY
+
+    @property
+    def timeout(self) -> float:
+        return self._timeout if self._timeout is not None else settings.OMNIROUTE_TIMEOUT_SECONDS
 
     def _headers(self) -> Dict[str, str]:
         headers = {

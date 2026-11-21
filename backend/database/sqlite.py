@@ -2,6 +2,7 @@ import sqlite3
 import json
 import os
 import uuid
+import re
 from typing import List, Dict, Any, Optional
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "synora.db")
@@ -105,6 +106,17 @@ def init_db():
         )
     """)
 
+    # Conversation sessions metadata table for auto-naming and persistent titles
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_sessions (
+            session_id TEXT PRIMARY KEY,
+            title TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversation_sessions(updated_at)")
+
     conn.commit()
     conn.close()
 
@@ -139,6 +151,88 @@ def redact_sensitive_object(obj: Any) -> Any:
     elif isinstance(obj, list):
         return [redact_sensitive_object(item) for item in obj]
     return obj
+
+def detect_conversation_title(prompt: str, response: str = "", task_type: str = "") -> str:
+    """
+    Automatically detects and generates a clean, concise (3-6 words, <= 45 chars)
+    human-friendly title for the chat based on intent and content.
+    """
+    if not prompt or not prompt.strip():
+        return "New Conversation"
+
+    clean = prompt.strip()
+
+    # 1. Detect GitHub / Git repository URLs
+    repo_match = re.search(r'github\.com/([^/\s]+)/([^/\s\.]+)', clean)
+    if repo_match:
+        return f"{repo_match.group(2)} Repository"
+
+    # 2. Clean out multi-line blocks / code blocks
+    clean = re.sub(r'```[\s\S]*?```', '', clean).strip()
+    first_line = clean.split('\n')[0].strip()
+    if first_line:
+        clean = first_line
+
+    # 3. Handle short generic phrases
+    lower = clean.lower()
+    if any(k in lower for k in ("fix this code", "fix it", "fix code", "debug code", "solve this", "fix this", "find the bug", "debug this")):
+        return "Code Fix & Debugging"
+    if "secret key" in lower or ("api key" in lower and "redact" in lower):
+        return "Security Credential Test"
+    if "i am running locally" in lower or "running locally" in lower or ("ollama" in lower and "offline" in lower):
+        return "Local Model Verification"
+
+    # 4. Strip conversational fillers and request prefixes
+    prefixes = [
+        r'^(can you|could you|please|help me( with)?|i want to|i need to|how to|how do i|tell me about|what is|what are|explain|write a|create a|generate a|build a|add (a )?feature (in which|where)?)\s+',
+        r'^(hey|hi|hello|greetings)\s*,?\s*',
+        r'^(say:\s*|say\s+)',
+    ]
+    for pattern in prefixes:
+        clean = re.sub(pattern, '', clean, flags=re.IGNORECASE).strip()
+
+    clean = re.sub(r'(\s+please|\s+thanks|\s+thank you)[\.!?]*$', '', clean, flags=re.IGNORECASE).strip()
+
+    # If stripped to empty, fallback to prompt first line
+    if not clean:
+        clean = prompt.strip().split('\n')[0].strip()
+
+    words = clean.split()
+    if len(words) > 6:
+        clean = " ".join(words[:6])
+
+    if len(clean) > 42:
+        clean = clean[:42].rstrip(" ,.-;:_")
+
+    def title_case_word(w: str) -> str:
+        upper = w.upper()
+        if upper in ("API", "HTTP", "HTTPS", "SQL", "LLM", "AI", "URL", "UI", "DB", "REST", "JSON", "CLI", "REPL", "M2", "GPU", "VRAM"):
+            return upper
+        if w.lower() in ("a", "an", "the", "in", "on", "of", "and", "or", "for", "with", "to"):
+            return w.lower()
+        return w.capitalize()
+
+    title_words = [title_case_word(w) for w in clean.split()]
+    if title_words:
+        title_words[0] = title_words[0].capitalize()
+        title = " ".join(title_words)
+    else:
+        title = "General Conversation"
+
+    return re.sub(r'[?!.,;:]+$', '', title).strip() or "General Conversation"
+
+def update_session_title(session_id: str, title: str) -> bool:
+    """Updates or overrides the conversation title for a given session."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO conversation_sessions (session_id, title, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(session_id) DO UPDATE SET title = excluded.title, updated_at = CURRENT_TIMESTAMP
+    """, (session_id, title.strip()))
+    conn.commit()
+    conn.close()
+    return True
 
 def save_chat_record(
     user_prompt: str,
@@ -182,6 +276,20 @@ def save_chat_record(
         json.dumps(clean_trace)
     ))
     record_id = cursor.lastrowid
+
+    # Auto-detect and persist conversation title
+    cursor.execute("SELECT title FROM conversation_sessions WHERE session_id = ?", (sid,))
+    s_row = cursor.fetchone()
+    if not s_row or not s_row[0]:
+        auto_title = detect_conversation_title(clean_prompt, clean_response, task_type)
+        cursor.execute("""
+            INSERT INTO conversation_sessions (session_id, title, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(session_id) DO UPDATE SET title = excluded.title, updated_at = CURRENT_TIMESTAMP
+        """, (sid, auto_title))
+    else:
+        cursor.execute("UPDATE conversation_sessions SET updated_at = CURRENT_TIMESTAMP WHERE session_id = ?", (sid,))
+
     conn.commit()
     conn.close()
     return record_id
@@ -219,21 +327,59 @@ def get_session_history(session_id: str, limit: int = 10) -> List[Dict[str, Any]
     return results
 
 def get_all_sessions(limit: int = 50) -> List[Dict[str, Any]]:
-    """Retrieves active sessions with latest message preview and turn counts."""
+    """Retrieves active sessions with auto-detected title, message preview, and turn counts."""
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT session_id, COUNT(*) as turn_count, MAX(timestamp) as last_updated,
+        SELECT c1.session_id, 
+               COUNT(*) as turn_count, 
+               MAX(c1.timestamp) as last_updated,
+               cs.title as stored_title,
                (SELECT user_prompt FROM chat_history c2 WHERE c2.session_id = c1.session_id ORDER BY id ASC LIMIT 1) as first_prompt,
                (SELECT final_response FROM chat_history c3 WHERE c3.session_id = c1.session_id ORDER BY id DESC LIMIT 1) as latest_response
         FROM chat_history c1
-        GROUP BY session_id
+        LEFT JOIN conversation_sessions cs ON c1.session_id = cs.session_id
+        GROUP BY c1.session_id
         ORDER BY last_updated DESC
         LIMIT ?
     """, (limit,))
     rows = cursor.fetchall()
-    results = [dict(row) for row in rows]
+    results = []
+    needs_commit = False
+    for row in rows:
+        session_id = row["session_id"]
+        stored_title = row["stored_title"]
+        first_prompt = row["first_prompt"] or ""
+        latest_response = row["latest_response"] or ""
+
+        if stored_title and stored_title.strip():
+            title = stored_title.strip()
+        else:
+            title = detect_conversation_title(first_prompt, latest_response)
+            try:
+                cursor.execute("""
+                    INSERT INTO conversation_sessions (session_id, title, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET title = excluded.title
+                """, (session_id, title, row["last_updated"]))
+                needs_commit = True
+            except Exception:
+                pass
+
+        results.append({
+            "session_id": session_id,
+            "title": title,
+            "preview": title,
+            "user_prompt": first_prompt,
+            "first_prompt": first_prompt,
+            "latest_response": latest_response,
+            "turn_count": row["turn_count"],
+            "last_updated": row["last_updated"],
+            "updated_at": row["last_updated"]
+        })
+    if needs_commit:
+        conn.commit()
     conn.close()
     return results
 

@@ -5,6 +5,7 @@
 .slim/deepwork/
 .omnivscodeagent/
 .omniroute-data/
+.omniroute_data/
 omnirouteCloud/
 omnirouteSite/
 _cache/

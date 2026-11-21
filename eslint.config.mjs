@@ -242,6 +242,8 @@ const eslintConfig = [
       ".source/**",
       // VS Code extension and its large test fixtures
       "vscode-extension/**",
+      // Frontend Vite React app (managed with its own dependencies and build)
+      "frontend/**",
       // packages/ui-kit/ — snapshot vendorizado do CI UI Kit (lintado upstream; patches locais proibidos)
       "packages/ui-kit/**",
       "_references/**",

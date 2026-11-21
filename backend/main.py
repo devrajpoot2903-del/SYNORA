@@ -19,7 +19,14 @@ from backend.core.evaluator import evaluator, EvaluationMetric
 from backend.core.memory import memory
 from backend.core.monitor import monitor
 from backend.core.omniroute_process import omniroute_process_manager
-from backend.database.sqlite import save_chat_record, get_recent_history, get_session_history, get_all_sessions
+from backend.database.sqlite import (
+    save_chat_record, 
+    get_recent_history, 
+    get_session_history, 
+    get_all_sessions,
+    update_session_title,
+    detect_conversation_title
+)
 from backend.agent import (
     tool_manager,
     permission_enforcer,
@@ -135,6 +142,12 @@ class ChatResponse(BaseModel):
 
 class SelectModelsRequest(BaseModel):
     model_ids: List[str] = Field(..., description="List of model IDs to set as active in the registry")
+
+class PullModelRequest(BaseModel):
+    model_name: str = Field(..., description="Model tag to pull into Ollama, e.g. qwen2.5-coder:1.5b or deepseek-r1:7b")
+
+class UpdateConversationTitleRequest(BaseModel):
+    title: str = Field(..., description="Custom or detected title for the conversation")
 
 class SettingsUpdateRequest(BaseModel):
     allow_simulation: Optional[bool] = None
@@ -307,6 +320,35 @@ def select_models(req: SelectModelsRequest):
         "message": f"Updated active models. {len(active_models)} models now active.",
         "active_models": [m.id for m in active_models]
     }
+
+@app.post("/api/models/pull")
+async def pull_model(req: PullModelRequest):
+    """
+    Triggers pulling an open-weight model directly into the local Ollama engine.
+    """
+    model_name = req.model_name.strip()
+    if not model_name:
+        raise HTTPException(status_code=400, detail="model_name is required")
+
+    try:
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            resp = await client.post(
+                f"{settings.OLLAMA_BASE_URL}/api/pull",
+                json={"name": model_name, "stream": False}
+            )
+            if resp.status_code == 200:
+                await model_availability.refresh(force=True)
+                return {
+                    "success": True,
+                    "message": f"Model '{model_name}' successfully pulled and ready for local inference.",
+                    "model": model_name
+                }
+            else:
+                raise HTTPException(status_code=resp.status_code, detail=f"Ollama returned {resp.status_code}: {resp.text}")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail=f"Ollama daemon is not reachable at {settings.OLLAMA_BASE_URL}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -1076,6 +1118,18 @@ def get_conversation_turns(session_id: str, limit: int = Query(default=50, ge=1,
         "turn_count": len(turns),
         "turns": turns
     }
+
+@app.patch("/api/conversations/{session_id}/title")
+@app.post("/api/conversations/{session_id}/title")
+def rename_conversation(session_id: str, req: UpdateConversationTitleRequest):
+    """
+    Renames a conversation session manually or updates its detected title.
+    """
+    cleaned_title = req.title.strip()
+    if not cleaned_title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    update_session_title(session_id, cleaned_title)
+    return {"success": True, "session_id": session_id, "title": cleaned_title}
 
 @app.get("/api/history")
 def get_history(limit: int = Query(default=20, ge=1, le=100)):

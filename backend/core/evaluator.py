@@ -10,6 +10,7 @@ class EvaluationMetric(BaseModel):
     disagreements_found: List[str] = Field(default_factory=list)
     # Numerical consensus percentage removed per v0.4.1 specification
     consistency_score: Optional[float] = None
+    consensus_score: Optional[float] = None
 
 class Evaluator:
     def evaluate(self, stage_results: List[StageResult], simulated: bool = False) -> EvaluationMetric:
